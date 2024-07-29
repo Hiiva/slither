@@ -59,6 +59,8 @@ class SlitherClient:
         self.last_boost_time = 0
         self.rotation_interval = 0.1  # 100 ms interval for rotation packets
         self.boost_interval = 0.1  # 100 ms interval for boost packets
+        self.fpsls = [1] * 300
+        self.fmlts = [1] * 300
         self.food_colors = [
             (255, 0, 0),    # Red
             (0, 255, 0),    # Green
@@ -279,8 +281,10 @@ class SlitherClient:
             "a": self.handle_initial_setup,
             "6": self.handle_6_message,
             "v": self.handle_v_message,
-            "n": self.handle_snake_update,
-            "g": self.handle_snake_move,
+            "n": self.handle_increase_snake_n,
+            "N": self.handle_increase_snake_N,
+            "g": self.handle_move_snake_g,
+            "G": self.handle_move_snake_G,
             "l": self.handle_leaderboard,
             "F": self.handle_add_food,
             "f": self.handle_add_food,
@@ -303,9 +307,6 @@ class SlitherClient:
             "5": lambda data: self.handle_rotation(data, '5'),
             "h": self.handle_update_snake_fullness,
             "r": self.handle_remove_snake_part,
-            "G": self.handle_snake_move,
-            "N": self.handle_increase_snake,
-            "n": self.handle_increase_snake
         }
 
         async for message in self.ws:
@@ -316,6 +317,94 @@ class SlitherClient:
                 handlers[msg_type](message[3:])
             else:
                 logger.warning(f"Unknown message type: {msg_type}")
+
+    def handle_increase_snake_n(self, data):
+        logger.debug("Handling increase snake 'n' message")
+        try:
+            snake_id, = struct.unpack('!H', data[:2])
+            x, y = struct.unpack('!hh', data[2:6])
+            fam, = struct.unpack('!I', b'\x00' + data[6:9])
+            fam /= 16777215
+
+            if snake_id not in self.snakes:
+                self.snakes[snake_id] = {'body': [], 'fam': fam}
+
+            self.snakes[snake_id]['body'].append((x, y))
+            self.snakes[snake_id]['fam'] = fam
+
+            if len(self.snakes[snake_id]['body']) > 100:
+                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
+
+            if snake_id == self.player_id:
+                self.player_snake = self.snakes[snake_id]
+                self.camera_x, self.camera_y = x, y
+
+            logger.debug(f"Increased snake: id={snake_id}, x={x}, y={y}, fam={fam}")
+        except struct.error as e:
+            logger.error(f"Error parsing increase snake 'n' packet: {e}")
+
+    def handle_increase_snake_N(self, data):
+        logger.debug("Handling increase snake 'N' message")
+        try:
+            snake_id, = struct.unpack('!H', data[:2])
+            dx, dy = struct.unpack('!bb', data[2:4])
+            x = dx - 128
+            y = dy - 128
+            fam, = struct.unpack('!I', b'\x00' + data[4:7])
+            fam /= 16777215
+
+            if snake_id not in self.snakes:
+                self.snakes[snake_id] = {'body': [], 'fam': fam}
+
+            self.snakes[snake_id]['body'].append((x, y))
+            self.snakes[snake_id]['fam'] = fam
+
+            if len(self.snakes[snake_id]['body']) > 100:
+                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
+
+            if snake_id == self.player_id:
+                self.player_snake = self.snakes[snake_id]
+                self.camera_x, self.camera_y = x, y
+
+            logger.debug(f"Increased snake: id={snake_id}, x={x}, y={y}, fam={fam}")
+        except struct.error as e:
+            logger.error(f"Error parsing increase snake 'N' packet: {e}")
+
+    def handle_move_snake_g(self, data):
+        try:
+            snake_id, = struct.unpack('!H', data[:2])
+            x, y = struct.unpack('!hh', data[2:6])
+
+            if snake_id not in self.snakes:
+                self.snakes[snake_id] = {'body': [], 'fam': 0, 'color': self.snake_colors[0]}  # Initialize with default color
+
+            self.snakes[snake_id]['body'].append((x, y))
+
+            if len(self.snakes[snake_id]['body']) > 100:
+                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
+
+            logger.debug(f"Moved snake: id={snake_id}, x={x}, y={y}")
+        except struct.error as e:
+            logger.error(f"Error parsing move snake packet 'g': {e}")
+
+    def handle_move_snake_G(self, data):
+        try:
+            snake_id, = struct.unpack('!H', data[:2])
+            dx, dy = struct.unpack('!bb', data[2:4])
+            x = dx - 128
+            y = dy - 128
+
+            if snake_id not in self.snakes:
+                self.snakes[snake_id] = {'body': [], 'fam': 0, 'color': self.snake_colors[0]}  # Initialize with default color
+
+            self.snakes[snake_id]['body'].append((x, y))
+
+            if len(self.snakes[snake_id]['body']) > 100:
+                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
+
+            logger.debug(f"Moved snake: id={snake_id}, x={x}, y={y}")
+        except struct.error as e:
+            logger.error(f"Error parsing move snake packet 'G': {e}")
 
     def handle_snake_presence(self, data):
         logger.debug("Handling snake presence message")
@@ -563,45 +652,6 @@ class SlitherClient:
             logger.warning(f"Unexpected packet length for prey presence: {len(data)}")
             logger.warning(f"Raw data: {data.hex()}")
 
-    def handle_increase_snake(self, data):
-        try:
-            snake_id, = struct.unpack('!H', data[:2])
-            if len(data) == 11:  # Packet "n"
-                x, y = struct.unpack('!hh', data[2:6])
-                fam, = struct.unpack('!I', data[6:9])
-                fam /= 16777215
-            elif len(data) == 8:  # Packet "N"
-                dx, dy = struct.unpack('!bb', data[2:4])
-                x = dx - 128
-                y = dy - 128
-                fam, = struct.unpack('!I', data[4:7])
-                fam /= 16777215
-            elif len(data) == 7:  # Handling the unexpected 7-byte packet for "N"
-                dx, dy = struct.unpack('!bb', data[2:4])
-                x = dx - 128
-                y = dy - 128
-                fam, = struct.unpack('!I', b'\x00' + data[4:7])
-                fam /= 16777215
-            else:
-                logger.warning(f"Unexpected packet length for increase snake: {len(data)}")
-                return
-
-            if snake_id not in self.snakes:
-                self.snakes[snake_id] = {'body': [], 'fam': fam}
-
-            # Update the snake's body with the new head position
-            self.snakes[snake_id]['body'].append((x, y))
-            self.snakes[snake_id]['fam'] = fam
-
-            if len(self.snakes[snake_id]['body']) > 100:
-                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
-
-            logger.debug(f"Increased snake: id={snake_id}, x={x}, y={y}, fam={fam}")
-        except struct.error as e:
-            logger.error(f"Error parsing increase snake: {e}")
-
-
-
     def handle_update_snake_fullness(self, data):
         try:
             snake_id, = struct.unpack('!H', data[:2])
@@ -612,56 +662,54 @@ class SlitherClient:
                 self.snakes[snake_id]['fam'] = fam
                 logger.debug(f"Updated snake fullness: id={snake_id}, fam={fam}")
             else:
-                logger.warning(f"Received fullness update for unknown snake: id={snake_id}")
+                logger.warning(f"Snake {snake_id} not found for fullness update")
         except struct.error as e:
             logger.error(f"Error parsing update snake fullness: {e}")
 
-
     def handle_remove_snake_part(self, data):
-        if len(data) == 2:
+        try:
             snake_id, = struct.unpack('!H', data[:2])
-            if snake_id in self.snakes:
-                logger.debug(f"Remove snake part: id={snake_id}")
-                if self.snakes[snake_id]['body']:
-                    self.snakes[snake_id]['body'].pop(0)
-        elif len(data) == 6:
-            snake_id, fam = struct.unpack('!HI', data[:6])
-            fam /= 16777215
-            logger.debug(f"Remove snake part with fullness: id={snake_id}, fam={fam}")
-            if snake_id in self.snakes:
-                if self.snakes[snake_id]['body']:
-                    self.snakes[snake_id]['body'].pop(0)
-                self.snakes[snake_id]['fam'] = fam
 
-    def handle_snake_move(self, data):
-        snake_id, dx, dy = struct.unpack('!Hbb', data[:4])
-        if snake_id in self.snakes:
-            if not self.snakes[snake_id]['body']:
-                # Initialize the snake's body with the new head position if it's empty
-                new_head_x = dx - 128
-                new_head_y = dy - 128
-                self.snakes[snake_id]['body'] = [(new_head_x, new_head_y)]
+            if len(data) == 5:
+                fam, = struct.unpack('!I', b'\x00' + data[2:5])
+                fam /= 16777215
+
+            if snake_id in self.snakes:
+                if self.snakes[snake_id]['body']:
+                    self.snakes[snake_id]['body'].pop()
+                    logger.debug(f"Removed snake part: id={snake_id}")
+
+                if len(data) == 5:
+                    self.snakes[snake_id]['fam'] = fam
+                    logger.debug(f"Updated snake fullness after removal: id={snake_id}, fam={fam}")
             else:
-                head_x, head_y = self.snakes[snake_id]['body'][-1]
-                new_head_x = head_x + dx - 128
-                new_head_y = head_y + dy - 128
-                self.snakes[snake_id]['body'].append((new_head_x, new_head_y))
-                if len(self.snakes[snake_id]['body']) > 100:
-                    self.snakes[snake_id]['body'].pop(0)
-            logger.debug(f"Move snake: id={snake_id}, x={new_head_x}, y={new_head_y}")
+                logger.warning(f"Snake {snake_id} not found for part removal")
+        except struct.error as e:
+            logger.error(f"Error parsing remove snake part: {e}")
 
     def handle_initial_setup(self, data):
+        logger.debug("Handling initial setup message")
         try:
-            if len(data) < 23:
-                raise struct.error("Data length is too short for initial setup")
+            self.game_radius, = struct.unpack('!I', b'\x00' + data[:3])
+            self.mscps, = struct.unpack('!H', data[3:5])
+            self.sector_size, = struct.unpack('!H', data[5:7])
+            self.sector_count_along_edge, = struct.unpack('!H', data[7:9])
+            self.spangdv, = struct.unpack('!B', data[9:10])
+            self.nsp1, = struct.unpack('!H', data[10:12])
+            self.nsp2, = struct.unpack('!H', data[12:14])
+            self.nsp3, = struct.unpack('!H', data[14:16])
+            self.mamu, = struct.unpack('!H', data[16:18])
+            self.manu2, = struct.unpack('!H', data[18:20])
+            self.cst, = struct.unpack('!H', data[20:22])
+            self.protocol_version, = struct.unpack('!B', data[22:23])
 
-            self.game_radius, self.mscps, self.sector_size, _, _, _, _, _, _, self.protocol_version = struct.unpack('!IHHHHHHHIB', data[:23])
-            logger.debug(f"Parsed initial setup: game_radius={self.game_radius}, mscps={self.mscps}, sector_size={self.sector_size}, protocol_version={self.protocol_version}")
-            self.alive = True
-            self.send_initial_setup()
-            self.start_game_loop()
+            logger.debug(f"Initial setup: game_radius={self.game_radius}, mscps={self.mscps}, sector_size={self.sector_size}, "
+                        f"sector_count_along_edge={self.sector_count_along_edge}, spangdv={self.spangdv}, nsp1={self.nsp1}, "
+                        f"nsp2={self.nsp2}, nsp3={self.nsp3}, mamu={self.mamu}, manu2={self.manu2}, cst={self.cst}, "
+                        f"protocol_version={self.protocol_version}")
+
         except struct.error as e:
-            logger.error(f"Error parsing initial setup: {e}")
+            logger.error(f"Error parsing initial setup packet: {e}")
 
     def handle_6_message(self, data):
         logger.debug("Handling '6' message")
@@ -734,28 +782,6 @@ class SlitherClient:
             logger.error(f"Error parsing eat food packet: {e}")
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
-
-    def handle_snake_update(self, data):
-        try:
-            snake_id, = struct.unpack('!H', data[:2])
-            x, y = struct.unpack('!hh', data[2:6])
-            fam, = struct.unpack('!I', data[6:10])
-            fam /= 16777215
-
-            if snake_id not in self.snakes:
-                self.snakes[snake_id] = {'body': [], 'fam': fam}
-
-            self.snakes[snake_id]['body'].append((x, y))
-            self.snakes[snake_id]['fam'] = fam
-
-            if len(self.snakes[snake_id]['body']) > 100:
-                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
-
-            if snake_id == self.player_id:
-                self.player_snake = self.snakes[snake_id]
-                self.camera_x, self.camera_y = x, y
-        except struct.error as e:
-            logger.error(f"Error parsing snake update: {e}")
 
     def handle_minimap_update(self, data):
         logger.debug("Handling minimap update")
@@ -969,23 +995,6 @@ class SlitherClient:
                 logger.error(f"Pygame error in draw loop: {e}")
                 break
 
-    def update_player_snake(self):
-        if self.player_id is None or self.player_id not in self.snakes:
-            logger.warning("Player snake not found")
-            return
-
-        player_snake = self.snakes[self.player_id]
-
-        # Update position
-        if player_snake['body']:
-            head_x, head_y = player_snake['body'][-1]
-            self.camera_x, self.camera_y = head_x, head_y
-
-        # Update rotation and speed
-        if 'ang' in player_snake and 'sp' in player_snake:
-            player_snake['ang'] = player_snake['ang'] % (2 * math.pi)
-            player_snake['sp'] = max(0, min(player_snake['sp'], 1))
-
     def draw_background(self):
         # Calculate the position to start drawing the background
         start_x = int(-(self.camera_x % self.background_rect.width))
@@ -1006,6 +1015,36 @@ class SlitherClient:
         msg = struct.pack('B', 253 if boosting else 254)
         asyncio.create_task(self.ws.send(msg))
         logger.debug(f"Sent boost: {boosting}")
+
+    def update_player_snake(self):
+        if self.player_id is None or self.player_id not in self.snakes:
+            return
+
+        player_snake = self.snakes[self.player_id]
+
+        # Update position
+        if player_snake['body']:
+            head_x, head_y = player_snake['body'][-1]
+            self.camera_x = head_x
+            self.camera_y = head_y
+
+        # Update direction and angle
+        if 'ang' in player_snake:
+            player_snake['ang'] = player_snake['ang'] % (2 * math.pi)
+        if 'wang' in player_snake:
+            player_snake['wang'] = player_snake['wang'] % (2 * math.pi)
+
+        # Update speed
+        if 'sp' in player_snake:
+            player_snake['sp'] = max(0, player_snake['sp'])
+
+        # Update fullness
+        if 'fam' in player_snake:
+            player_snake['fam'] = max(0, min(1.0, player_snake['fam']))
+
+        logger.debug(f"Updated player snake: id={self.player_id}, position=({self.camera_x}, {self.camera_y}), "
+                    f"angle={player_snake.get('ang')}, wanted_angle={player_snake.get('wang')}, "
+                    f"speed={player_snake.get('sp')}, fullness={player_snake.get('fam')}")
 
     def draw_elements(self):
         self.draw_background()
