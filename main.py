@@ -59,8 +59,6 @@ class SlitherClient:
         self.last_boost_time = 0
         self.rotation_interval = 0.1  # 100 ms interval for rotation packets
         self.boost_interval = 0.1  # 100 ms interval for boost packets
-        self.fpsls = [1] * 300
-        self.fmlts = [1] * 300
         self.food_colors = [
             (255, 0, 0),    # Red
             (0, 255, 0),    # Green
@@ -335,9 +333,10 @@ class SlitherClient:
             if len(self.snakes[snake_id]['body']) > 100:
                 self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
 
+            # Update position and fullness
             if snake_id == self.player_id:
-                self.player_snake = self.snakes[snake_id]
                 self.camera_x, self.camera_y = x, y
+                self.player_snake['fam'] = fam
 
             logger.debug(f"Increased snake: id={snake_id}, x={x}, y={y}, fam={fam}")
         except struct.error as e:
@@ -356,19 +355,26 @@ class SlitherClient:
             if snake_id not in self.snakes:
                 self.snakes[snake_id] = {'body': [], 'fam': fam}
 
+            if not isinstance(self.snakes[snake_id], dict):
+                logger.error(f"Snake {snake_id} is not a dictionary: {self.snakes[snake_id]}")
+                return
+
             self.snakes[snake_id]['body'].append((x, y))
             self.snakes[snake_id]['fam'] = fam
 
             if len(self.snakes[snake_id]['body']) > 100:
                 self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
 
+            # Update position and fullness
             if snake_id == self.player_id:
-                self.player_snake = self.snakes[snake_id]
                 self.camera_x, self.camera_y = x, y
+                self.player_snake['fam'] = fam
 
             logger.debug(f"Increased snake: id={snake_id}, x={x}, y={y}, fam={fam}")
         except struct.error as e:
             logger.error(f"Error parsing increase snake 'N' packet: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
 
     def handle_move_snake_g(self, data):
         try:
@@ -382,6 +388,10 @@ class SlitherClient:
 
             if len(self.snakes[snake_id]['body']) > 100:
                 self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
+
+            # Update position
+            if snake_id == self.player_id:
+                self.camera_x, self.camera_y = x, y
 
             logger.debug(f"Moved snake: id={snake_id}, x={x}, y={y}")
         except struct.error as e:
@@ -401,6 +411,10 @@ class SlitherClient:
 
             if len(self.snakes[snake_id]['body']) > 100:
                 self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
+
+            # Update position
+            if snake_id == self.player_id:
+                self.camera_x, self.camera_y = x, y
 
             logger.debug(f"Moved snake: id={snake_id}, x={x}, y={y}")
         except struct.error as e:
@@ -659,12 +673,21 @@ class SlitherClient:
             fam /= 16777215
 
             if snake_id in self.snakes:
-                self.snakes[snake_id]['fam'] = fam
-                logger.debug(f"Updated snake fullness: id={snake_id}, fam={fam}")
+                if isinstance(self.snakes[snake_id], dict):
+                    self.snakes[snake_id]['fam'] = fam
+                    logger.debug(f"Updated snake fullness: id={snake_id}, fam={fam}")
+
+                    # Update player snake fullness
+                    if snake_id == self.player_id:
+                        self.player_snake['fam'] = fam
+                else:
+                    logger.warning(f"Snake {snake_id} is not a dictionary")
             else:
                 logger.warning(f"Snake {snake_id} not found for fullness update")
         except struct.error as e:
             logger.error(f"Error parsing update snake fullness: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
 
     def handle_remove_snake_part(self, data):
         try:
