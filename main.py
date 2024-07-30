@@ -59,6 +59,14 @@ class SlitherClient:
         self.last_boost_time = 0
         self.rotation_interval = 0.1  # 100 ms interval for rotation packets
         self.boost_interval = 0.1  # 100 ms interval for boost packets
+        self.sector_count_along_edge = 0
+        self.spangdv = 0
+        self.nsp1 = 0
+        self.nsp2 = 0
+        self.nsp3 = 0
+        self.mamu = 0
+        self.manu2 = 0
+        self.cst = 0
         self.food_colors = [
             (255, 0, 0),    # Red
             (0, 255, 0),    # Green
@@ -327,30 +335,36 @@ class SlitherClient:
             logger.error(f"Error parsing increase snake '{msg_type}' packet: {e}")
 
     def handle_move_snake(self, data, msg_type):
+        logger.debug(f"Handling move snake '{msg_type}' message")
         try:
             snake_id, = struct.unpack('!H', data[:2])
             if msg_type == 'g':
                 x, y = struct.unpack('!hh', data[2:6])
             elif msg_type == 'G':
                 dx, dy = struct.unpack('!bb', data[2:4])
-                x = dx - 128
-                y = dy - 128
+                if snake_id in self.snakes and self.snakes[snake_id]['body']:
+                    head_x, head_y = self.snakes[snake_id]['body'][-1]
+                    x = head_x + (dx - 128)
+                    y = head_y + (dy - 128)
+                else:
+                    logger.warning(f"Snake {snake_id} has no body to calculate relative position")
+                    return
+            else:
+                logger.warning(f"Unexpected message type for move snake: {msg_type}")
+                return
 
             if snake_id not in self.snakes:
-                self.snakes[snake_id] = {'body': [], 'fam': 0, 'color': self.snake_colors[0]}  # Initialize with default color
+                self.snakes[snake_id] = {'body': [], 'fam': 0}
 
             self.snakes[snake_id]['body'].append((x, y))
 
-            if len(self.snakes[snake_id]['body']) > 100:
-                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
-
-            # Update position
+            # Update position and fullness
             if snake_id == self.player_id:
                 self.camera_x, self.camera_y = x, y
 
             logger.debug(f"Moved snake: id={snake_id}, x={x}, y={y}")
         except struct.error as e:
-            logger.error(f"Error parsing move snake packet '{msg_type}': {e}")
+            logger.error(f"Error parsing move snake '{msg_type}' packet: {e}")
 
     def handle_snake_presence(self, data):
         logger.debug("Handling snake presence message")
@@ -369,71 +383,7 @@ class SlitherClient:
             else:
                 logger.warning(f"Unexpected status for snake presence: {status}")
 
-        elif len(data) >= 34:
-            try:
-                snake_id, = struct.unpack('!H', data[:2])
-                ehang, = struct.unpack('!I', b'\x00' + data[2:5])
-                ehang = ehang * 2 * math.pi / 16777215
-                dir, = struct.unpack('!B', data[5:6])
-                dir -= 48
-                wang, = struct.unpack('!I', b'\x00' + data[6:9])
-                wang = wang * 2 * math.pi / 16777215
-                speed, = struct.unpack('!H', data[9:11])
-                speed /= 1000
-                fam, = struct.unpack('!I', b'\x00' + data[11:14])
-                fam /= 16777215
-                skin, = struct.unpack('!B', data[14:15])
-                x, = struct.unpack('!I', b'\x00' + data[15:18])
-                x /= 5
-                y, = struct.unpack('!I', b'\x00' + data[18:21])
-                y /= 5
-                name_len, = struct.unpack('!B', data[21:22])
-                name = data[22:22 + name_len].decode('utf-8', errors='replace')
-                custom_skin_len, = struct.unpack('!B', data[22 + name_len:23 + name_len])
-                custom_skin = data[23 + name_len:23 + name_len + custom_skin_len] if custom_skin_len > 0 else None
-
-                body_parts = []
-                index = 23 + name_len + custom_skin_len
-                while index < len(data):
-                    x_rel, = struct.unpack('!b', data[index:index + 1])
-                    y_rel, = struct.unpack('!b', data[index + 1:index + 2])
-                    x_rel = (x_rel - 127) / 2
-                    y_rel = (y_rel - 127) / 2
-                    body_parts.append((x_rel, y_rel))
-                    index += 2
-
-                snake_color = self.snake_colors[skin % len(self.snake_colors)]
-
-                self.snakes[snake_id] = {
-                    'body': body_parts,
-                    'fam': fam,
-                    'skin': skin,
-                    'x': x,
-                    'y': y,
-                    'speed': speed,
-                    'ehang': ehang,
-                    'wang': wang,
-                    'dir': dir,
-                    'name': name,
-                    'custom_skin': custom_skin,
-                    'ang': ehang,  # Initialize angle
-                    'sp': speed,   # Initialize speed
-                    'color': snake_color  # Add color to snake data
-                }
-
-                logger.debug(f"Snake {snake_id} added: x={x}, y={y}, fam={fam}, skin={skin}, speed={speed}, name={name}, custom_skin={custom_skin}, body_parts={body_parts}")
-                # If this is the first snake we're receiving data for, it's likely the player's snake
-                if self.player_id is None:
-                    self.player_id = snake_id
-                    self.player_snake = self.snakes[snake_id]
-                    self.camera_x = x
-                    self.camera_y = y
-                    logger.info(f"Player snake ID set to {snake_id}")
-
-            except struct.error as e:
-                logger.error(f"Error parsing snake presence packet: {e}")
-
-        elif len(data) == 31:
+        elif len(data) >= 31:
             try:
                 snake_id, = struct.unpack('!H', data[:2])
                 ehang, = struct.unpack('!I', b'\x00' + data[2:5])
@@ -703,7 +653,7 @@ class SlitherClient:
 
             food_id = (y * self.game_radius * 3) + x
             food_info = self.foods.get((x, y))
-            
+
             if food_info is not None:
                 del self.foods[(x, y)]
                 logger.debug(f"Food eaten: id={food_id}, x={x}, y={y}, eater_snake_id={eater_snake_id}, color={food_info['color']}, size={food_info['size']}")
@@ -852,8 +802,9 @@ class SlitherClient:
     async def game_loop(self):
         while True:
             await self.handle_input()
-            self.update_player_snake()
             self.update_camera()
+            if self.alive:
+                self.update_player_snake()
             await asyncio.sleep(0.016)  # ~60 FPS
 
     def update_camera(self):
@@ -946,36 +897,6 @@ class SlitherClient:
         asyncio.create_task(self.ws.send(msg))
         logger.debug(f"Sent boost: {boosting}")
 
-    def update_player_snake(self):
-        if self.player_id is None or self.player_id not in self.snakes:
-            return
-
-        player_snake = self.snakes[self.player_id]
-
-        # Update position
-        if player_snake['body']:
-            head_x, head_y = player_snake['body'][-1]
-            self.camera_x = head_x
-            self.camera_y = head_y
-
-        # Update direction and angle
-        if 'ang' in player_snake:
-            player_snake['ang'] = player_snake['ang'] % (2 * math.pi)
-        if 'wang' in player_snake:
-            player_snake['wang'] = player_snake['wang'] % (2 * math.pi)
-
-        # Update speed
-        if 'sp' in player_snake:
-            player_snake['sp'] = max(0, player_snake['sp'])
-
-        # Update fullness
-        if 'fam' in player_snake:
-            player_snake['fam'] = max(0, min(1.0, player_snake['fam']))
-
-        logger.debug(f"Updated player snake: id={self.player_id}, position=({self.camera_x}, {self.camera_y}), "
-                    f"angle={player_snake.get('ang')}, wanted_angle={player_snake.get('wang')}, "
-                    f"speed={player_snake.get('sp')}, fullness={player_snake.get('fam')}")
-
     def draw_snake(self, snake, color):
         """
         Draw a snake on the screen.
@@ -988,23 +909,47 @@ class SlitherClient:
             screen_x, screen_y = self.world_to_screen((x, y))
             pygame.draw.circle(self.screen, color, (screen_x, screen_y), max(1, int(5 * self.zoom)))
 
-    def draw_elements(self):
-        self.draw_background()
+    def update_player_snake(self):
+        if self.player_id is not None and self.player_id in self.snakes:
+            player_snake = self.snakes[self.player_id]
 
+            # Update position
+            if player_snake['body']:
+                head_x, head_y = player_snake['body'][-1]
+                self.camera_x, self.camera_y = head_x, head_y
+
+            # Update direction and speed
+            if 'ang' in player_snake:
+                self.angle = player_snake['ang']
+            if 'sp' in player_snake:
+                self.speed = player_snake['sp']
+
+            # Update fullness
+            if 'fam' in player_snake:
+                self.player_snake['fam'] = player_snake['fam']
+
+            logger.debug(f"Updated player snake: id={self.player_id}, position=({self.camera_x}, {self.camera_y}), angle={self.angle}, speed={self.speed}, fam={self.player_snake['fam']}")
+        else:
+            logger.warning("Player snake not found for update")
+
+    def draw_elements(self):
+        """
+        Draw all game elements on the screen.
+        """
         # Draw snakes
         for snake_id, snake in self.snakes.items():
-            self.draw_snake(snake, snake['color'])
+            if self.is_in_range(snake['x'], snake['y']):
+                self.draw_snake(snake, snake['color'])
 
-        # Draw foods
-        for (x, y), food_info in self.foods.items():
-            self.draw_food(x, y, food_info['color'], food_info['size'])
+        # Draw food
+        for (x, y), food in self.foods.items():
+            if self.is_in_range(x, y):
+                self.draw_food(x, y, food['color'], food['size'])
 
-        # Draw preys
-        # for prey_id, prey in self.preys.items():
-        #     self.draw_prey(prey)
-
-        # Draw leaderboard
-        self.draw_leaderboard()
+        # Draw prey
+        for prey_id, prey in self.preys.items():
+            if self.is_in_range(prey['x'], prey['y']):
+                self.draw_prey(prey)
 
     def draw_food(self, x, y, color, size):
         screen_x, screen_y = self.world_to_screen((x, y))
