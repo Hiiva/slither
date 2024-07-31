@@ -344,8 +344,8 @@ class SlitherClient:
                 dx, dy = struct.unpack('!bb', data[2:4])
                 if snake_id in self.snakes and self.snakes[snake_id]['body']:
                     head_x, head_y = self.snakes[snake_id]['body'][-1]
-                    x = head_x + (dx - 128)
-                    y = head_y + (dy - 128)
+                    x = head_x + dx
+                    y = head_y + dy
                 else:
                     logger.warning(f"Snake {snake_id} has no body to calculate relative position")
                     return
@@ -413,7 +413,16 @@ class SlitherClient:
                     y_rel, = struct.unpack('!b', data[index + 1:index + 2])
                     x_rel = (x_rel - 127) / 2
                     y_rel = (y_rel - 127) / 2
-                    body_parts.append((x_rel, y_rel))
+                    
+                    if body_parts:
+                        prev_x, prev_y = body_parts[-1]
+                        x = prev_x + x_rel
+                        y = prev_y + y_rel
+                    else:
+                        x = x + x_rel
+                        y = y + y_rel
+                    
+                    body_parts.append((x, y))
                     index += 2
 
                 snake_color = self.snake_colors[skin % len(self.snake_colors)]
@@ -812,8 +821,14 @@ class SlitherClient:
             player_snake = self.snakes[self.player_id]
             if player_snake['body']:
                 head_x, head_y = player_snake['body'][-1]
-                self.camera_x = head_x
-                self.camera_y = head_y
+                # Smoothly interpolate the camera position
+                self.camera_x = self.camera_x * 0.9 + head_x * 0.1
+                self.camera_y = self.camera_y * 0.9 + head_y * 0.1
+                logger.debug(f"Updated camera position: ({self.camera_x}, {self.camera_y})")
+            else:
+                logger.warning("Player snake has no body parts")
+        else:
+            logger.warning("Player snake not found for camera update")
 
     async def handle_input(self):
         for event in pygame.event.get():
@@ -898,16 +913,10 @@ class SlitherClient:
         logger.debug(f"Sent boost: {boosting}")
 
     def draw_snake(self, snake, color):
-        """
-        Draw a snake on the screen.
-
-        Parameters:
-        snake (dict): The snake data containing body parts and other attributes.
-        color (tuple): The color of the snake.
-        """
-        for x, y in snake['body']:
+        for i, (x, y) in enumerate(snake['body']):
             screen_x, screen_y = self.world_to_screen((x, y))
-            pygame.draw.circle(self.screen, color, (screen_x, screen_y), max(1, int(5 * self.zoom)))
+            radius = max(1, int((5 - i * 0.2) * self.zoom))  # Decrease size for tail parts
+            pygame.draw.circle(self.screen, color, (screen_x, screen_y), radius)
 
     def update_player_snake(self):
         if self.player_id is not None and self.player_id in self.snakes:
