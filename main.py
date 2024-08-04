@@ -67,6 +67,7 @@ class SlitherClient:
         self.mamu = 0
         self.manu2 = 0
         self.cst = 0
+        self.default_snake_length = 0
         self.food_colors = [
             (255, 0, 0),    # Red
             (0, 255, 0),    # Green
@@ -407,24 +408,9 @@ class SlitherClient:
                 custom_skin_len, = struct.unpack('!B', data[22 + name_len:23 + name_len])
                 custom_skin = data[23 + name_len:23 + name_len + custom_skin_len] if custom_skin_len > 0 else None
 
-                body_parts = []
-                index = 23 + name_len + custom_skin_len
-                while index < len(data):
-                    x_rel, = struct.unpack('!b', data[index:index + 1])
-                    y_rel, = struct.unpack('!b', data[index + 1:index + 2])
-                    x_rel = (x_rel - 127) / 2
-                    y_rel = (y_rel - 127) / 2
-                    
-                    if body_parts:
-                        prev_x, prev_y = body_parts[-1]
-                        x = prev_x + x_rel
-                        y = prev_y + y_rel
-                    else:
-                        x = x + x_rel
-                        y = y + y_rel
-                    
-                    body_parts.append((x, y))
-                    index += 2
+                body_parts = [(x, y)]  # Initialize with the head part
+                for i in range(1, self.default_snake_length):
+                    body_parts.append((x - i * 5, y))  # Add body parts behind the head
 
                 snake_color = self.snake_colors[skin % len(self.snake_colors)]
 
@@ -446,7 +432,6 @@ class SlitherClient:
                 }
 
                 logger.debug(f"Snake {snake_id} added: x={x}, y={y}, fam={fam}, skin={skin}, speed={speed}, name={name}, custom_skin={custom_skin}, body_parts={body_parts}")
-                # If this is the first snake we're receiving data for, it's likely the player's snake
                 if self.player_id is None:
                     self.player_id = snake_id
                     self.player_snake = self.snakes[snake_id]
