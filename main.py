@@ -302,36 +302,32 @@ class SlitherClient:
                 logger.warning(f"Unknown message type: {msg_type}")
 
     def handle_increase_snake(self, data, msg_type):
-        logger.debug(f"Handling increase snake '{msg_type}' message")
+        logger.debug(f"Handling increase snake message '{msg_type}'")
         try:
             snake_id, = struct.unpack('!H', data[:2])
+            if snake_id not in self.snakes:
+                logger.warning(f"Snake {snake_id} not found for increase update")
+                return
+
             if msg_type == 'n':
-                x, y = struct.unpack('!hh', data[2:6])
-                fam, = struct.unpack('!I', b'\x00' + data[6:9])
-                fam /= 16777215
+                x, y = struct.unpack('!HH', data[2:6])
             elif msg_type == 'N':
-                dx, dy = struct.unpack('!bb', data[2:4])
-                if snake_id not in self.snakes or not self.snakes[snake_id]['body']:
-                    logger.warning(f"Snake {snake_id} not found or has no body for relative movement update")
+                if not self.snakes[snake_id]['body']:
+                    logger.warning(f"Snake {snake_id} has no body parts for relative increase update")
                     return
+                dx, dy = struct.unpack('!BB', data[2:4])
                 last_x, last_y = self.snakes[snake_id]['body'][-1]
                 x = last_x + (dx - 128)
                 y = last_y + (dy - 128)
-                fam, = struct.unpack('!I', b'\x00' + data[4:7])
-                fam /= 16777215
+            else:
+                logger.error(f"Unknown increase snake message type: {msg_type}")
+                return
 
-            if snake_id not in self.snakes:
-                self.snakes[snake_id] = {'body': [], 'fam': fam}
+            fam, = struct.unpack('!I', b'\x00' + data[6:9])
+            fam /= 16777215
 
             self.snakes[snake_id]['body'].append((x, y))
             self.snakes[snake_id]['fam'] = fam
-
-            if len(self.snakes[snake_id]['body']) > 100:
-                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
-
-            if snake_id == self.player_id:
-                self.camera_x, self.camera_y = x, y
-                self.player_snake['fam'] = fam
 
             logger.debug(f"Increased snake: id={snake_id}, x={x}, y={y}, fam={fam}")
         except struct.error as e:
