@@ -311,17 +311,17 @@ class SlitherClient:
                 fam /= 16777215
             elif msg_type == 'N':
                 dx, dy = struct.unpack('!bb', data[2:4])
-                x = dx - 128
-                y = dy - 128
+                if snake_id not in self.snakes or not self.snakes[snake_id]['body']:
+                    logger.warning(f"Snake {snake_id} not found or has no body for relative movement update")
+                    return
+                last_x, last_y = self.snakes[snake_id]['body'][-1]
+                x = last_x + (dx - 128)
+                y = last_y + (dy - 128)
                 fam, = struct.unpack('!I', b'\x00' + data[4:7])
                 fam /= 16777215
 
             if snake_id not in self.snakes:
                 self.snakes[snake_id] = {'body': [], 'fam': fam}
-
-            # Remove the oldest body part to simulate movement
-            if len(self.snakes[snake_id]['body']) > 1:
-                self.snakes[snake_id]['body'].pop(0)
 
             self.snakes[snake_id]['body'].append((x, y))
             self.snakes[snake_id]['fam'] = fam
@@ -329,7 +329,6 @@ class SlitherClient:
             if len(self.snakes[snake_id]['body']) > 100:
                 self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
 
-            # Update position and fullness
             if snake_id == self.player_id:
                 self.camera_x, self.camera_y = x, y
                 self.player_snake['fam'] = fam
