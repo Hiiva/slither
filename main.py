@@ -335,32 +335,30 @@ class SlitherClient:
             logger.error(f"Error parsing increase snake '{msg_type}' packet: {e}")
 
     def handle_move_snake(self, data, msg_type):
-        logger.debug(f"Handling move snake '{msg_type}' message")
+        logger.debug(f"Handling move snake message '{msg_type}'")
         try:
             snake_id, = struct.unpack('!H', data[:2])
-            if msg_type == 'g':
-                x, y = struct.unpack('!hh', data[2:6])
-            elif msg_type == 'G':
-                dx, dy = struct.unpack('!bb', data[2:4])
-                if snake_id in self.snakes and self.snakes[snake_id]['body']:
-                    head_x, head_y = self.snakes[snake_id]['body'][-1]
-                    x = head_x + dx
-                    y = head_y + dy
-                else:
-                    logger.warning(f"Snake {snake_id} has no body to calculate relative position")
-                    return
-            else:
-                logger.warning(f"Unexpected message type for move snake: {msg_type}")
+            if snake_id not in self.snakes:
+                logger.warning(f"Snake {snake_id} not found for movement update")
                 return
 
-            if snake_id not in self.snakes:
-                self.snakes[snake_id] = {'body': [], 'fam': 0}
+            if msg_type == 'g':
+                x, y = struct.unpack('!HH', data[2:6])
+            elif msg_type == 'G':
+                if not self.snakes[snake_id]['body']:
+                    logger.warning(f"Snake {snake_id} has no body parts for relative movement update")
+                    return
+                dx, dy = struct.unpack('!BB', data[2:4])
+                last_x, last_y = self.snakes[snake_id]['body'][-1]
+                x = last_x + (dx - 128)
+                y = last_y + (dy - 128)
+            else:
+                logger.error(f"Unknown move snake message type: {msg_type}")
+                return
 
             self.snakes[snake_id]['body'].append((x, y))
-
-            # Update position and fullness
-            if snake_id == self.player_id:
-                self.camera_x, self.camera_y = x, y
+            if len(self.snakes[snake_id]['body']) > 100:
+                self.snakes[snake_id]['body'] = self.snakes[snake_id]['body'][-100:]
 
             logger.debug(f"Moved snake: id={snake_id}, x={x}, y={y}")
         except struct.error as e:
