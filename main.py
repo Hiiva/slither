@@ -666,11 +666,6 @@ class SlitherClient:
             if food_info is not None:
                 del self.foods[(x, y)]
                 logger.debug(f"Food eaten: id={food_id}, x={x}, y={y}, eater_snake_id={eater_snake_id}, color={food_info['color']}, size={food_info['size']}")
-
-                if eater_snake_id == self.player_id:
-                    self.player_snake['body'].append((x, y))
-                    self.player_snake['fam'] += 1
-                    logger.debug(f"Player snake ate food: new length={len(self.player_snake['body'])}")
             else:
                 logger.warning(f"Food not found: id={food_id}")
         except struct.error as e:
@@ -912,6 +907,11 @@ class SlitherClient:
         asyncio.create_task(self.ws.send(msg))
         logger.debug(f"Sent boost: {boosting}")
 
+    def calculate_thickness(self, fam):
+        base_thickness = 5  # Base thickness
+        max_thickness = 20  # Maximum thickness
+        return base_thickness + (max_thickness - base_thickness) * fam
+
     def draw_snake(self, snake, color):
         if not snake['body']:
             logger.warning(f"Snake has no body parts: {snake}")
@@ -926,12 +926,14 @@ class SlitherClient:
             x2, y2 = snake['body'][i + 1]
             screen_x1, screen_y1 = self.world_to_screen((x1, y1))
             screen_x2, screen_y2 = self.world_to_screen((x2, y2))
-            pygame.draw.line(self.screen, color, (screen_x1, screen_y1), (screen_x2, screen_y2), max(1, int(5 * self.zoom)))
+            thickness = self.calculate_thickness(snake['fam'])
+            pygame.draw.line(self.screen, color, (screen_x1, screen_y1), (screen_x2, screen_y2), max(1, int(thickness * self.zoom)))
 
         # Draw the head of the snake as a slightly larger circle
         head_x, head_y = snake['body'][-1]
         screen_head_x, screen_head_y = self.world_to_screen((head_x, head_y))
-        pygame.draw.circle(self.screen, color, (screen_head_x, screen_head_y), max(1, int(7 * self.zoom)))
+        thickness = self.calculate_thickness(snake['fam'])
+        pygame.draw.circle(self.screen, color, (screen_head_x, screen_head_y), max(1, int((thickness + 2) * self.zoom)))
 
         # Draw the snake's name above the head
         name = snake.get('name', '').strip()
