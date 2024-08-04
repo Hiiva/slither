@@ -928,7 +928,8 @@ class SlitherClient:
         logger.debug(f"Sent boost: {boosting}")
 
     def draw_snake(self, snake, color):
-        if len(snake['body']) < 2:
+        if not snake['body']:
+            logger.warning(f"Snake has no body parts: {snake}")
             return
 
         # Load font for rendering snake names
@@ -940,12 +941,12 @@ class SlitherClient:
             x2, y2 = snake['body'][i + 1]
             screen_x1, screen_y1 = self.world_to_screen((x1, y1))
             screen_x2, screen_y2 = self.world_to_screen((x2, y2))
-            pygame.draw.line(self.screen, color, (screen_x1, screen_y1), (screen_x2, screen_y2), int(5 * self.zoom))
+            pygame.draw.line(self.screen, color, (screen_x1, screen_y1), (screen_x2, screen_y2), max(1, int(5 * self.zoom)))
 
         # Draw the head of the snake as a slightly larger circle
         head_x, head_y = snake['body'][-1]
         screen_head_x, screen_head_y = self.world_to_screen((head_x, head_y))
-        pygame.draw.circle(self.screen, color, (screen_head_x, screen_head_y), int(7 * self.zoom))
+        pygame.draw.circle(self.screen, color, (screen_head_x, screen_head_y), max(1, int(7 * self.zoom)))
 
         # Draw the snake's name above the head
         name = snake.get('name', '').strip()
@@ -968,20 +969,18 @@ class SlitherClient:
         if self.player_id is not None and self.player_id in self.snakes:
             player_snake = self.snakes[self.player_id]
 
-            # Update position
+            # Update position using the last known position
             if player_snake['body']:
-                head_x, head_y = player_snake['body'][-1]
-                self.camera_x, self.camera_y = head_x, head_y
+                self.camera_x, self.camera_y = player_snake['body'][-1]
+            elif 'x' in player_snake and 'y' in player_snake:
+                self.camera_x, self.camera_y = player_snake['x'], player_snake['y']
 
             # Update direction and speed
-            if 'ang' in player_snake:
-                self.angle = player_snake['ang']
-            if 'sp' in player_snake:
-                self.speed = player_snake['sp']
+            self.angle = player_snake.get('ang', self.angle)
+            self.speed = player_snake.get('sp', self.speed)
 
             # Update fullness
-            if 'fam' in player_snake:
-                self.player_snake['fam'] = player_snake['fam']
+            self.player_snake['fam'] = player_snake.get('fam', self.player_snake.get('fam', 0))
 
             logger.debug(f"Updated player snake: id={self.player_id}, position=({self.camera_x}, {self.camera_y}), angle={self.angle}, speed={self.speed}, fam={self.player_snake['fam']}")
         else:
@@ -993,8 +992,10 @@ class SlitherClient:
         """
         # Draw snakes
         for snake_id, snake in self.snakes.items():
-            if self.is_in_range(snake['x'], snake['y']):
-                self.draw_snake(snake, snake['color'])
+            if snake['body']:
+                x, y = snake['body'][-1]
+                if self.is_in_range(x, y):
+                    self.draw_snake(snake, snake['color'])
 
         # Draw food
         for (x, y), food in self.foods.items():
@@ -1078,28 +1079,9 @@ class SlitherClient:
 
 
     def is_in_range(self, snake_x, snake_y):
-        """
-        Determine if a snake is within the visible range of the player's snake.
+        visible_range = max(SCREEN_WIDTH, SCREEN_HEIGHT) / 2 / self.zoom
+        return abs(snake_x - self.camera_x) <= visible_range and abs(snake_y - self.camera_y) <= visible_range
 
-        Parameters:
-        snake_x (float): The x-coordinate of the snake.
-        snake_y (float): The y-coordinate of the snake.
-
-        Returns:
-        bool: True if the snake is within the visible range, False otherwise.
-        """
-        if self.player_id is None or self.player_id not in self.snakes:
-            return False
-
-        player_snake = self.snakes[self.player_id]
-        if not player_snake['body']:
-            return False
-
-        player_x, player_y = player_snake['body'][-1]
-        visible_range = SCREEN_WIDTH / 2 / self.zoom  # Adjust the range based on the zoom level
-
-        distance = math.sqrt((snake_x - player_x) ** 2 + (snake_y - player_y) ** 2)
-        return distance <= visible_range
 
     def world_to_screen(self, pos):
         x, y = pos
