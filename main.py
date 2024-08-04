@@ -319,6 +319,10 @@ class SlitherClient:
             if snake_id not in self.snakes:
                 self.snakes[snake_id] = {'body': [], 'fam': fam}
 
+            # Remove the oldest body part to simulate movement
+            if len(self.snakes[snake_id]['body']) > 1:
+                self.snakes[snake_id]['body'].pop(0)
+
             self.snakes[snake_id]['body'].append((x, y))
             self.snakes[snake_id]['fam'] = fam
 
@@ -355,6 +359,10 @@ class SlitherClient:
             else:
                 logger.error(f"Unknown move snake message type: {msg_type}")
                 return
+
+            # Remove the oldest body part to simulate movement
+            if len(self.snakes[snake_id]['body']) > 1:
+                self.snakes[snake_id]['body'].pop(0)
 
             self.snakes[snake_id]['body'].append((x, y))
             if len(self.snakes[snake_id]['body']) > 100:
@@ -560,25 +568,34 @@ class SlitherClient:
             logger.error(f"Unexpected error: {e}")
 
     def handle_remove_snake_part(self, data):
+        logger.debug("Handling remove snake part message")
         try:
             snake_id, = struct.unpack('!H', data[:2])
+            if snake_id not in self.snakes:
+                logger.warning(f"Snake {snake_id} not found for part removal")
+                return
 
-            if len(data) == 5:
+            if len(data) == 2:
+                # Only snake ID provided, remove the last body part
+                self.snakes[snake_id]['body'].pop()
+            elif len(data) == 5:
+                # Snake ID and fullness value provided
                 fam, = struct.unpack('!I', b'\x00' + data[2:5])
                 fam /= 16777215
+                self.snakes[snake_id]['fam'] = fam
+                self.snakes[snake_id]['body'].pop()
 
-            if snake_id in self.snakes:
-                if self.snakes[snake_id]['body']:
-                    self.snakes[snake_id]['body'].pop()
-                    logger.debug(f"Removed snake part: id={snake_id}")
-
-                if len(data) == 5:
-                    self.snakes[snake_id]['fam'] = fam
-                    logger.debug(f"Updated snake fullness after removal: id={snake_id}, fam={fam}")
+            # If the snake has no body parts left, remove it entirely
+            if not self.snakes[snake_id]['body']:
+                del self.snakes[snake_id]
+                logger.debug(f"Removed snake {snake_id} as it has no body parts left")
             else:
-                logger.warning(f"Snake {snake_id} not found for part removal")
+                logger.debug(f"Removed last part of snake {snake_id}, remaining body parts: {len(self.snakes[snake_id]['body'])}")
+
         except struct.error as e:
-            logger.error(f"Error parsing remove snake part: {e}")
+            logger.error(f"Error parsing remove snake part packet: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
 
     def handle_initial_setup(self, data):
         logger.debug("Handling initial setup message")
@@ -911,10 +928,41 @@ class SlitherClient:
         logger.debug(f"Sent boost: {boosting}")
 
     def draw_snake(self, snake, color):
-        for i, (x, y) in enumerate(snake['body']):
-            screen_x, screen_y = self.world_to_screen((x, y))
-            radius = max(1, int((5 - i * 0.2) * self.zoom))  # Decrease size for tail parts
-            pygame.draw.circle(self.screen, color, (screen_x, screen_y), radius)
+        if len(snake['body']) < 2:
+            return
+
+        # Load font for rendering snake names
+        font = pygame.font.Font(None, 24)
+
+        # Draw lines connecting the snake parts
+        for i in range(len(snake['body']) - 1):
+            x1, y1 = snake['body'][i]
+            x2, y2 = snake['body'][i + 1]
+            screen_x1, screen_y1 = self.world_to_screen((x1, y1))
+            screen_x2, screen_y2 = self.world_to_screen((x2, y2))
+            pygame.draw.line(self.screen, color, (screen_x1, screen_y1), (screen_x2, screen_y2), int(5 * self.zoom))
+
+        # Draw the head of the snake as a slightly larger circle
+        head_x, head_y = snake['body'][-1]
+        screen_head_x, screen_head_y = self.world_to_screen((head_x, head_y))
+        pygame.draw.circle(self.screen, color, (screen_head_x, screen_head_y), int(7 * self.zoom))
+
+        # Draw the snake's name above the head
+        name = snake.get('name', '').strip()
+        if not name:
+            name = "(No Name)"
+        name_surface = font.render(name, True, (255, 255, 255))
+        name_rect = name_surface.get_rect(center=(screen_head_x, screen_head_y - 20))
+
+        # Add a small black outline for readability
+        outline_surface = font.render(name, True, (0, 0, 0))
+        outline_positions = [(name_rect.x - 1, name_rect.y - 1), (name_rect.x + 1, name_rect.y - 1),
+                             (name_rect.x - 1, name_rect.y + 1), (name_rect.x + 1, name_rect.y + 1)]
+        for pos in outline_positions:
+            self.screen.blit(outline_surface, pos)
+
+        # Blit the name surface on top of the outline
+        self.screen.blit(name_surface, name_rect)
 
     def update_player_snake(self):
         if self.player_id is not None and self.player_id in self.snakes:
