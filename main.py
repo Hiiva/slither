@@ -552,30 +552,35 @@ class SlitherClient:
         try:
             snake_id, = struct.unpack('!H', data[:2])
             if snake_id not in self.snakes:
-                logger.warning(f"Snake {snake_id} not found for part removal")
+                logger.warning(f"Snake {snake_id} not found for removal update")
                 return
 
-            if len(data) == 2:
-                # Only snake ID provided, remove the last body part
-                self.snakes[snake_id]['body'].pop()
-            elif len(data) == 5:
-                # Snake ID and fullness value provided
-                fam, = struct.unpack('!I', b'\x00' + data[2:5])
-                fam /= 16777215
-                self.snakes[snake_id]['fam'] = fam
-                self.snakes[snake_id]['body'].pop()
+            if len(data) == 5:
+                # Variant 1: Remove the last part of the snake
+                if self.snakes[snake_id]['body']:
+                    self.snakes[snake_id]['body'].pop()
+                    logger.debug(f"Removed last part of snake: id={snake_id}")
+                else:
+                    logger.warning(f"Snake {snake_id} has no body parts to remove")
 
-            # If the snake has no body parts left, remove it entirely
-            if not self.snakes[snake_id]['body']:
-                del self.snakes[snake_id]
-                logger.debug(f"Removed snake {snake_id} as it has no body parts left")
+            elif len(data) == 8:
+                # Variant 2: Remove the last part and update fam
+                fam, = struct.unpack('!I', b'\x00' + data[5:8])
+                fam /= 16777215
+
+                if self.snakes[snake_id]['body']:
+                    self.snakes[snake_id]['body'].pop()
+                    self.snakes[snake_id]['fam'] = fam
+                    logger.debug(f"Removed last part of snake and updated fam: id={snake_id}, fam={fam}")
+                else:
+                    logger.warning(f"Snake {snake_id} has no body parts to remove")
+
             else:
-                logger.debug(f"Removed last part of snake {snake_id}, remaining body parts: {len(self.snakes[snake_id]['body'])}")
+                logger.warning(f"Unexpected packet length for remove snake part: {len(data)}")
+                logger.warning(f"Raw data: {data.hex()}")
 
         except struct.error as e:
             logger.error(f"Error parsing remove snake part packet: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
 
     def handle_initial_setup(self, data):
         logger.debug("Handling initial setup message")
