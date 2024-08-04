@@ -656,27 +656,26 @@ class SlitherClient:
     def handle_eat_food(self, data):
         logger.debug("Handling eat food message")
         try:
-            x, = struct.unpack('!H', data[:2])
-            y, = struct.unpack('!H', data[2:4])
+            food_x, food_y = struct.unpack('!HH', data[:4])
             eater_snake_id, = struct.unpack('!H', data[4:6])
 
-            food_id = (y * self.game_radius * 3) + x
-            food_info = self.foods.get((x, y))
-
-            if food_info is not None:
-                del self.foods[(x, y)]
-                logger.debug(f"Food eaten: id={food_id}, x={x}, y={y}, eater_snake_id={eater_snake_id}, color={food_info['color']}, size={food_info['size']}")
-
-                if eater_snake_id == self.player_id:
-                    self.player_snake['body'].append((x, y))
-                    self.player_snake['fam'] += 1
-                    logger.debug(f"Player snake ate food: new length={len(self.player_snake['body'])}")
+            food_id = (food_y * self.game_radius * 3) + food_x
+            if food_id in self.foods:
+                del self.foods[food_id]
+                logger.debug(f"Food eaten: id={food_id}, x={food_x}, y={food_y}, eater_snake_id={eater_snake_id}")
             else:
-                logger.warning(f"Food not found: id={food_id}")
+                logger.warning(f"Food not found: id={food_id}, x={food_x}, y={food_y}")
+
+            # Update the eater snake's state if necessary
+            if eater_snake_id in self.snakes:
+                eater_snake = self.snakes[eater_snake_id]
+                eater_snake['fam'] += 1  # Assuming eating food increases fam by 1
+                logger.debug(f"Updated eater snake: id={eater_snake_id}, fam={eater_snake['fam']}")
+            else:
+                logger.warning(f"Eater snake not found: id={eater_snake_id}")
+
         except struct.error as e:
             logger.error(f"Error parsing eat food packet: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
 
     def handle_minimap_update(self, data):
         logger.debug("Handling minimap update")
