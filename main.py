@@ -1059,11 +1059,12 @@ class SlitherClient:
         # Display top 10 players
         for i, player in enumerate(self.leaderboard[:10], 1):
             username = player['username'].replace('\x00', '')  # Remove null characters
-            text = f"{i}. {username}: {player['score']}"
-            surface = font.render(text, True, (255, 255, 255))
+            score = player['score']  # Use the pre-calculated score
+            text = f"{i}. {username}: {score}"
+            color = self.snake_colors[player['color'] % len(self.snake_colors)]
+            surface = font.render(text, True, color)
             self.screen.blit(surface, (x, y))
             y += spacing  # Move to the next vertical position
-
 
     def is_in_range(self, snake_x, snake_y):
         visible_range = max(SCREEN_WIDTH, SCREEN_HEIGHT) / 2 / self.zoom
