@@ -836,27 +836,29 @@ class SlitherClient:
                     self.zoom *= 1.1
                 elif event.button == 5:  # Mouse wheel down
                     self.zoom /= 1.1
+                elif event.button == 1:  # Left mouse button
+                    if not self.boosting:
+                        self.send_boost(True)
+                        self.boosting = True
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:  # Left mouse button
+                    if self.boosting:
+                        self.send_boost(False)
+                        self.boosting = False
 
-        keys = pygame.key.get_pressed()
-        current_time = time.time()
-
-        if keys[pygame.K_LEFT] and current_time - self.last_rotation_time >= self.rotation_interval:
-            self.send_rotation(252, 127)  # Turn left
-            self.last_rotation_time = current_time
-        elif keys[pygame.K_RIGHT] and current_time - self.last_rotation_time >= self.rotation_interval:
-            self.send_rotation(252, 128)  # Turn right
-            self.last_rotation_time = current_time
-
-        if keys[pygame.K_SPACE] and current_time - self.last_boost_time >= self.boost_interval:
-            if not self.boosting:
-                self.send_boost(True)
-                self.boosting = True
-                self.last_boost_time = current_time
-        else:
-            if self.boosting:
-                self.send_boost(False)
-                self.boosting = False
-                self.last_boost_time = current_time
+        if pygame.mouse.get_focused():
+            current_time = time.time()
+            if current_time - self.last_rotation_time >= self.rotation_interval:
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                snake_head_screen_x, snake_head_screen_y = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
+                delta_x = mouse_x - snake_head_screen_x
+                delta_y = mouse_y - snake_head_screen_y
+                angle = math.atan2(delta_y, delta_x)
+                byte1 = int(angle * 256 / (2 * math.pi)) & 0xFF
+                byte2 = (self.speed_multiplier << 5) & 0xE0
+                self.send_rotation(byte1, byte2)
+                logger.debug(f"Calculated angle: {angle}, byte1: {byte1}, byte2: {byte2}")
+                self.last_rotation_time = current_time
 
     def send_rotation(self, byte1, byte2):
         msg = struct.pack('BB', byte1, byte2)
@@ -1076,6 +1078,12 @@ class SlitherClient:
         screen_x = int((x - self.camera_x) * self.zoom + SCREEN_WIDTH / 2)
         screen_y = int((y - self.camera_y) * self.zoom + SCREEN_HEIGHT / 2)
         return screen_x, screen_y
+
+    def screen_to_world(self, pos):
+        screen_x, screen_y = pos
+        world_x = (screen_x - SCREEN_WIDTH / 2) / self.zoom + self.camera_x
+        world_y = (screen_y - SCREEN_HEIGHT / 2) / self.zoom + self.camera_y
+        return world_x, world_y
 
 def main():
     client = SlitherClient()
