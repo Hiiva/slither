@@ -699,7 +699,7 @@ class SlitherClient:
 
     def handle_leaderboard(self, data):
         try:
-            self.player_rank = data[0]
+            self.player_rank = struct.unpack('!H', data[1:3])[0]
             player_count, = struct.unpack('!H', data[3:5])
 
             leaderboard = []
